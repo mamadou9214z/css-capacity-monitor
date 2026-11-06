@@ -1,0 +1,66 @@
+name: OCI capacity monitor
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: capacity-monitor-pages
+  cancel-in-progress: true
+
+jobs:
+  check-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore previous state (for transition-only alerts)
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache
+          key: capacity-state-${{ github.run_id }}
+          restore-keys: |
+            capacity-state-
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check OCI capacity
+        env:
+          OCI_TENANCY_OCID: ${{ secrets.OCI_TENANCY_OCID }}
+          OCI_USER_OCID: ${{ secrets.OCI_USER_OCID }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+          OCI_PRIVATE_KEY_PASSPHRASE: ${{ secrets.OCI_PRIVATE_KEY_PASSPHRASE }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python monitor.py
+
+      - name: Save previous state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache
+          key: capacity-state-${{ github.run_id }}
+
+      - name: Upload dashboard
+        if: always()
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy dashboard
+        if: always()
+        uses: actions/deploy-pages@v4
